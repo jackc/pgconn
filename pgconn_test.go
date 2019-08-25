@@ -18,8 +18,8 @@ import (
 	"time"
 
 	"github.com/jackc/pgconn"
+	errors "github.com/jackc/pgconn/errors"
 	"github.com/jackc/pgproto3/v2"
-	errors "golang.org/x/xerrors"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"

@@ -19,9 +19,9 @@ import (
 	"time"
 
 	"github.com/jackc/chunkreader/v2"
+	errors "github.com/jackc/pgconn/errors"
 	"github.com/jackc/pgpassfile"
 	"github.com/jackc/pgproto3/v2"
-	errors "golang.org/x/xerrors"
 )
 
 type AfterConnectFunc func(ctx context.Context, pgconn *PgConn) error

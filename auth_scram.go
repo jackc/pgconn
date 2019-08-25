@@ -21,10 +21,10 @@ import (
 	"fmt"
 	"strconv"
 
+	errors "github.com/jackc/pgconn/errors"
 	"github.com/jackc/pgproto3/v2"
 	"golang.org/x/crypto/pbkdf2"
 	"golang.org/x/text/secure/precis"
-	errors "golang.org/x/xerrors"
 )
 
 const clientNonceLen = 18

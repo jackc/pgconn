@@ -4,7 +4,7 @@ import (
 	"context"
 	"net"
 
-	errors "golang.org/x/xerrors"
+	errors "github.com/jackc/pgconn/errors"
 )
 
 // ErrTLSRefused occurs when the connection attempt requires TLS and the

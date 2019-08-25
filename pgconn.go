@@ -15,10 +15,10 @@ import (
 	"sync"
 	"time"
 
+	errors "github.com/jackc/pgconn/errors"
 	"github.com/jackc/pgconn/internal/ctxwatch"
 	"github.com/jackc/pgio"
 	"github.com/jackc/pgproto3/v2"
-	errors "golang.org/x/xerrors"
 )
 
 const (
