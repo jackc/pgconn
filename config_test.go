@@ -215,6 +215,18 @@ func TestParseConfig(t *testing.T) {
 			},
 		},
 		{
+			name:       "database url no host",
+			connString: "postgres://jack@:5432/mydb?sslmode=disable",
+			config: &pgconn.Config{
+				User:          "jack",
+				Host:          "",
+				Port:          5432,
+				Database:      "mydb",
+				TLSConfig:     nil,
+				RuntimeParams: map[string]string{},
+			},
+		},
+		{
 			name:       "database url postgresql protocol",
 			connString: "postgresql://jack@localhost:5432/mydb?sslmode=disable",
 			config: &pgconn.Config{
@@ -240,6 +252,19 @@ func TestParseConfig(t *testing.T) {
 					"application_name": "pgxtest",
 					"search_path":      "myschema",
 				},
+			},
+		},
+		{
+			name:       "DSN with empty host",
+			connString: "user=jack password=secret host= port=5432 dbname=mydb sslmode=disable",
+			config: &pgconn.Config{
+				User:          "jack",
+				Password:      "secret",
+				Host:          "",
+				Port:          5432,
+				Database:      "mydb",
+				TLSConfig:     nil,
+				RuntimeParams: map[string]string{},
 			},
 		},
 		{

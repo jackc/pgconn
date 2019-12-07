@@ -363,12 +363,12 @@ func addURLSettings(settings map[string]string, connString string) error {
 	var hosts []string
 	var ports []string
 	for _, host := range strings.Split(url.Host, ",") {
-		parts := strings.SplitN(host, ":", 2)
-		if parts[0] != "" {
-			hosts = append(hosts, parts[0])
-		}
-		if len(parts) == 2 {
-			ports = append(ports, parts[1])
+		h, port, err := net.SplitHostPort(host)
+		if err == nil {
+			hosts = append(hosts, h)
+			ports = append(ports, port)
+		} else {
+			hosts = append(hosts, host)
 		}
 	}
 	if len(hosts) > 0 {
