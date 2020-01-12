@@ -29,16 +29,18 @@ func NewContextWatcher(onCancel func(), onUnwatchAfterCancel func()) *ContextWat
 
 // Watch starts watching ctx. If ctx is canceled then the onCancel function passed to NewContextWatcher will be called.
 func (cw *ContextWatcher) Watch(ctx context.Context) {
-	if swapped := atomic.CompareAndSwapUint32(&cw.watching, 0, 1); !swapped {
+	shouldWatch := uint32(1)
+	if ctx.Done() == nil {
+		shouldWatch = 0
+	}
+
+	if swapped := atomic.CompareAndSwapUint32(&cw.watching, 0, shouldWatch); !swapped {
 		panic("Watch already in progress")
 	}
 
-	if ctx.Done() == nil {
-		cw.watching = 0 // Known to be not watching, so no need for an atomic store.
-		return
+	if shouldWatch == 1 {
+		go cw.watch(ctx)
 	}
-
-	go cw.watch(ctx)
 }
 
 func (cw *ContextWatcher) watch(ctx context.Context) {
