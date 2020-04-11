@@ -444,9 +444,13 @@ func parseDSNSettings(s string) (map[string]string, error) {
 
 		key = strings.Trim(s[:eqIdx], " \t\n\r\v\f")
 		s = strings.TrimLeft(s[eqIdx+1:], " \t\n\r\v\f")
-		if s[0] != '\'' {
+		if len(s) == 0 || s[0] != '\'' {
 			end := 0
 			for ; end < len(s); end++ {
+				if s[end] == '=' {
+					end = -1
+					break
+				}
 				if asciiSpace[s[end]] == 1 {
 					break
 				}
@@ -454,7 +458,9 @@ func parseDSNSettings(s string) (map[string]string, error) {
 					end++
 				}
 			}
-			val = strings.Replace(strings.Replace(s[:end], "\\\\", "\\", -1), "\\'", "'", -1)
+			if end >= 0 {
+				val = strings.Replace(strings.Replace(s[:end], "\\\\", "\\", -1), "\\'", "'", -1)
+			}
 			if end == len(s) {
 				s = ""
 			} else {
