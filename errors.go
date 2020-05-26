@@ -79,6 +79,11 @@ func (e *connectError) Unwrap() error {
 	return e.err
 }
 
+func IsConnectError(err error) bool {
+	_, ok := err.(*connectError)
+	return ok
+}
+
 type connLockError struct {
 	status string
 }
@@ -89,6 +94,11 @@ func (e *connLockError) SafeToRetry() bool {
 
 func (e *connLockError) Error() string {
 	return e.status
+}
+
+func IsConnLockError(err error) bool {
+	_, ok := err.(*connLockError)
+	return ok
 }
 
 type parseConfigError struct {
@@ -106,6 +116,11 @@ func (e *parseConfigError) Error() string {
 
 func (e *parseConfigError) Unwrap() error {
 	return e.err
+}
+
+func IsParseConfigError(err error) bool {
+	_, ok := err.(*parseConfigError)
+	return ok
 }
 
 type pgconnError struct {
@@ -132,6 +147,11 @@ func (e *pgconnError) Unwrap() error {
 	return e.err
 }
 
+func IsPgConnError(err error) bool {
+	_, ok := err.(*pgconnError)
+	return ok
+}
+
 type contextAlreadyDoneError struct {
 	err error
 }
@@ -146,6 +166,11 @@ func (e *contextAlreadyDoneError) SafeToRetry() bool {
 
 func (e *contextAlreadyDoneError) Unwrap() error {
 	return e.err
+}
+
+func IsContextAlreadyDoneError(err error) bool {
+	_, ok := err.(*contextAlreadyDoneError)
+	return ok
 }
 
 type writeError struct {
@@ -163,4 +188,9 @@ func (e *writeError) SafeToRetry() bool {
 
 func (e *writeError) Unwrap() error {
 	return e.err
+}
+
+func IsWriteError(err error) bool {
+	_, ok := err.(*writeError)
+	return ok
 }
