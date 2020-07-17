@@ -285,6 +285,45 @@ func TestParseConfig(t *testing.T) {
 			},
 		},
 		{
+			name:       "DSN with empty string values",
+			connString: "user= password= host= port=5432 dbname= sslmode=disable",
+			config: &pgconn.Config{
+				User:          "",
+				Password:      "",
+				Host:          "",
+				Port:          5432,
+				Database:      "",
+				TLSConfig:     nil,
+				RuntimeParams: map[string]string{},
+			},
+		},
+		{
+			name:       "DSN with empty string value for the last param",
+			connString: "user=jack password=secret host=localhost sslmode=disable dbname=",
+			config: &pgconn.Config{
+				User:          "jack",
+				Password:      "secret",
+				Host:          "localhost",
+				Port:          5432,
+				Database:      "",
+				TLSConfig:     nil,
+				RuntimeParams: map[string]string{},
+			},
+		},
+		{
+			name:       "DSN with space between key and value",
+			connString: "user = jack password = secret host = localhost dbname = mydb sslmode = disable",
+			config: &pgconn.Config{
+				User:          "jack",
+				Password:      "secret",
+				Host:          "localhost",
+				Port:          5432,
+				Database:      "mydb",
+				TLSConfig:     nil,
+				RuntimeParams: map[string]string{},
+			},
+		},
+		{
 			name:       "DSN with escaped single quote",
 			connString: "user=jack\\'s password=secret host=localhost port=5432 dbname=mydb sslmode=disable",
 			config: &pgconn.Config{
@@ -347,8 +386,8 @@ func TestParseConfig(t *testing.T) {
 			},
 		},
 		{
-			name:       "DSN with space between key and value",
-			connString: "user = 'jack' password = '' host = 'localhost' dbname = 'mydb' sslmode='disable'",
+			name:       "DSN with space between key and single quoted value",
+			connString: "user = 'jack' password = '' host = 'localhost' dbname = 'mydb' sslmode = 'disable'",
 			config: &pgconn.Config{
 				User:          "jack",
 				Host:          "localhost",
