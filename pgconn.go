@@ -573,7 +573,9 @@ func (pgConn *PgConn) asyncClose() {
 		ctx, cancel := context.WithDeadline(context.Background(), deadline)
 		defer cancel()
 
-		pgConn.CancelRequest(ctx)
+		if pgConn.status != connStatusClosed {
+			pgConn.CancelRequest(ctx)
+		}
 
 		pgConn.conn.SetDeadline(deadline)
 
