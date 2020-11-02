@@ -1549,6 +1549,11 @@ func (rr *ResultReader) concludeCommand(commandTag CommandTag, err error) {
 	rr.commandConcluded = true
 }
 
+// Err exposes the current error attached to the ResultReader
+func (rr *ResultReader) Err() error {
+	return rr.err
+}
+
 // Batch is a collection of queries that can be sent to the PostgreSQL server in a single round-trip.
 type Batch struct {
 	buf []byte
