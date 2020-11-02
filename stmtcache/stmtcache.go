@@ -20,6 +20,11 @@ type Cache interface {
 	// Clear removes all entries in the cache. Any prepared statements will be deallocated from the PostgreSQL session.
 	Clear(ctx context.Context) error
 
+	// ClearStmt removes a single entry from the cache.
+	// Any prepared statements will be deallocated from the PostgreSQL session.
+	// The underlying *pgconn.PgConn MUST NOT be in the middle of a transaction.
+	ClearStmt(ctx context.Context, sql string) error
+
 	// Len returns the number of cached prepared statement descriptions.
 	Len() int
 

@@ -53,6 +53,11 @@ func TestLRUModePrepare(t *testing.T) {
 	require.EqualValues(t, 2, cache.Len())
 	require.ElementsMatch(t, []string{"select 2", "select 3"}, fetchServerStatements(t, ctx, conn))
 
+	err = cache.ClearStmt(ctx, "select 2")
+	require.NoError(t, err)
+	require.EqualValues(t, 1, cache.Len())
+	require.ElementsMatch(t, []string{"select 3"}, fetchServerStatements(t, ctx, conn))
+
 	err = cache.Clear(ctx)
 	require.NoError(t, err)
 	require.EqualValues(t, 0, cache.Len())
@@ -120,6 +125,11 @@ func TestLRUModeDescribe(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, psd)
 	require.EqualValues(t, 2, cache.Len())
+	require.Empty(t, fetchServerStatements(t, ctx, conn))
+
+	err = cache.ClearStmt(ctx, "select 2")
+	require.NoError(t, err)
+	require.EqualValues(t, 1, cache.Len())
 	require.Empty(t, fetchServerStatements(t, ctx, conn))
 
 	err = cache.Clear(ctx)

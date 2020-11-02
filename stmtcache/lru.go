@@ -76,6 +76,27 @@ func (c *LRU) Clear(ctx context.Context) error {
 	return nil
 }
 
+// ClearStmt removes a single entry from the cache.
+// Any prepared statements will be deallocated from the PostgreSQL session.
+// The underlying *pgconn.PgConn MUST NOT be in the middle of a transaction.
+func (c *LRU) ClearStmt(ctx context.Context, sql string) error {
+	elem, inMap := c.m[sql]
+	if !inMap {
+		// The statement probably fell off the back of the list. In that case, we've
+		// ensured that it isn't in the cache, so we can declare victory.
+		return nil
+	}
+
+	c.l.Remove(elem)
+
+	psd := elem.Value.(*pgconn.StatementDescription)
+	delete(c.m, psd.SQL)
+	if c.mode == ModePrepare {
+		return c.conn.Exec(ctx, fmt.Sprintf("deallocate %s", psd.Name)).Close()
+	}
+	return nil
+}
+
 // Len returns the number of cached prepared statement descriptions.
 func (c *LRU) Len() int {
 	return c.l.Len()
