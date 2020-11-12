@@ -1413,6 +1413,10 @@ func (rr *ResultReader) Read() *Result {
 	return br
 }
 
+func (rr *ResultReader) Err() error {
+	return rr.err
+}
+
 // NextRow advances the ResultReader to the next row and returns true if a row is available.
 func (rr *ResultReader) NextRow() bool {
 	for !rr.commandConcluded {
