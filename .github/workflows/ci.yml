@@ -10,9 +10,10 @@ jobs:
 
   test:
     name: Test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-18.04
 
     strategy:
+      fail-fast: false
       matrix:
         go-version: [1.15, 1.16]
         pg-version: [9.6, 10, 11, 12, 13, cockroachdb]
