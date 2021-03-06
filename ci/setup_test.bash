@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -eux
 
-if [[ "${PGVERSION-}" =~ ^[0-9]+$ ]]
+if [[ "${PGVERSION-}" =~ ^[0-9.]+$ ]]
 then
   sudo apt-get remove -y --purge postgresql libpq-dev libpq5 postgresql-client-common postgresql-common
   sudo rm -rf /var/lib/postgresql
@@ -41,7 +41,7 @@ fi
 if [[ "${PGVERSION-}" =~ ^cockroach ]]
 then
   wget -qO- https://binaries.cockroachdb.com/cockroach-v20.2.5.linux-amd64.tgz | tar xvz
-  cp cockroach-v20.2.5.linux-amd64/cockroach /usr/local/bin/
+  sudo mv cockroach-v20.2.5.linux-amd64/cockroach /usr/local/bin/
   cockroach start-single-node --insecure --background --listen-addr=localhost
   cockroach sql --insecure -e 'create database pgx_text'
 fi
