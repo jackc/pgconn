@@ -29,6 +29,8 @@ func defaultSettings() map[string]string {
 		settings["user"] = username
 		settings["passfile"] = filepath.Join(appData, "postgresql", "pgpass.conf")
 		settings["servicefile"] = filepath.Join(user.HomeDir, ".pg_service.conf")
+		settings["sslcert"] = filepath.Join(appData, "postgresql", "postgresql.crt")
+		settings["sslkey"] = filepath.Join(appData, "postgresql", "postgresql.key")
 	}
 
 	settings["target_session_attrs"] = "any"
