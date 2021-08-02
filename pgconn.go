@@ -1419,6 +1419,10 @@ type Result struct {
 	Err               error
 }
 
+func (rr *ResultReader) Err() error {
+	return rr.err
+}
+
 // Read saves the query response to a Result.
 func (rr *ResultReader) Read() *Result {
 	br := &Result{}
