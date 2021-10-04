@@ -226,13 +226,6 @@ func connect(ctx context.Context, config *Config, fallbackConfig *FallbackConfig
 
 	pgConn.parameterStatuses = make(map[string]string)
 
-	if fallbackConfig.TLSConfig != nil {
-		if err := pgConn.startTLS(fallbackConfig.TLSConfig); err != nil {
-			pgConn.conn.Close()
-			return nil, &connectError{config: config, msg: "tls error", err: err}
-		}
-	}
-
 	pgConn.status = connStatusConnecting
 	pgConn.contextWatcher = ctxwatch.NewContextWatcher(
 		func() { pgConn.conn.SetDeadline(time.Date(1, 1, 1, 1, 1, 1, 1, time.UTC)) },
@@ -241,6 +234,13 @@ func connect(ctx context.Context, config *Config, fallbackConfig *FallbackConfig
 
 	pgConn.contextWatcher.Watch(ctx)
 	defer pgConn.contextWatcher.Unwatch()
+
+	if fallbackConfig.TLSConfig != nil {
+		if err := pgConn.startTLS(fallbackConfig.TLSConfig); err != nil {
+			pgConn.conn.Close()
+			return nil, &connectError{config: config, msg: "tls error", err: err}
+		}
+	}
 
 	pgConn.frontend = config.BuildFrontend(pgConn.conn, pgConn.conn)
 
