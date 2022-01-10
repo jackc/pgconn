@@ -1,12 +1,16 @@
 package pgconn_test
 
 import (
+	"context"
 	"crypto/tls"
 	"fmt"
 	"io/ioutil"
 	"os"
 	"os/user"
+	"runtime"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgconn"
 	"github.com/stretchr/testify/assert"
@@ -19,8 +23,18 @@ func TestParseConfig(t *testing.T) {
 	var osUserName string
 	osUser, err := user.Current()
 	if err == nil {
-		osUserName = osUser.Username
+		// Windows gives us the username here as `DOMAIN\user` or `LOCALPCNAME\user`,
+		// but the libpq default is just the `user` portion, so we strip off the first part.
+		if runtime.GOOS == "windows" && strings.Contains(osUser.Username, "\\") {
+			osUserName = osUser.Username[strings.LastIndex(osUser.Username, "\\")+1:]
+		} else {
+			osUserName = osUser.Username
+		}
 	}
+
+	config, err := pgconn.ParseConfig("")
+	require.NoError(t, err)
+	defaultHost := config.Host
 
 	tests := []struct {
 		name       string
@@ -127,12 +141,14 @@ func TestParseConfig(t *testing.T) {
 			name:       "sslmode verify-ca",
 			connString: "postgres://jack:secret@localhost:5432/mydb?sslmode=verify-ca",
 			config: &pgconn.Config{
-				User:          "jack",
-				Password:      "secret",
-				Host:          "localhost",
-				Port:          5432,
-				Database:      "mydb",
-				TLSConfig:     &tls.Config{ServerName: "localhost"},
+				User:     "jack",
+				Password: "secret",
+				Host:     "localhost",
+				Port:     5432,
+				Database: "mydb",
+				TLSConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
 				RuntimeParams: map[string]string{},
 			},
 		},
@@ -151,14 +167,15 @@ func TestParseConfig(t *testing.T) {
 		},
 		{
 			name:       "database url everything",
-			connString: "postgres://jack:secret@localhost:5432/mydb?sslmode=disable&application_name=pgxtest&search_path=myschema",
+			connString: "postgres://jack:secret@localhost:5432/mydb?sslmode=disable&application_name=pgxtest&search_path=myschema&connect_timeout=5",
 			config: &pgconn.Config{
-				User:      "jack",
-				Password:  "secret",
-				Host:      "localhost",
-				Port:      5432,
-				Database:  "mydb",
-				TLSConfig: nil,
+				User:           "jack",
+				Password:       "secret",
+				Host:           "localhost",
+				Port:           5432,
+				Database:       "mydb",
+				TLSConfig:      nil,
+				ConnectTimeout: 5 * time.Second,
 				RuntimeParams: map[string]string{
 					"application_name": "pgxtest",
 					"search_path":      "myschema",
@@ -215,6 +232,18 @@ func TestParseConfig(t *testing.T) {
 			},
 		},
 		{
+			name:       "database url dbname",
+			connString: "postgres://localhost/?dbname=foo&sslmode=disable",
+			config: &pgconn.Config{
+				User:          osUserName,
+				Host:          "localhost",
+				Port:          5432,
+				Database:      "foo",
+				TLSConfig:     nil,
+				RuntimeParams: map[string]string{},
+			},
+		},
+		{
 			name:       "database url postgresql protocol",
 			connString: "postgresql://jack@localhost:5432/mydb?sslmode=disable",
 			config: &pgconn.Config{
@@ -227,15 +256,52 @@ func TestParseConfig(t *testing.T) {
 			},
 		},
 		{
-			name:       "DSN everything",
-			connString: "user=jack password=secret host=localhost port=5432 dbname=mydb sslmode=disable application_name=pgxtest search_path=myschema",
+			name:       "database url IPv4 with port",
+			connString: "postgresql://jack@127.0.0.1:5433/mydb?sslmode=disable",
 			config: &pgconn.Config{
-				User:      "jack",
-				Password:  "secret",
-				Host:      "localhost",
-				Port:      5432,
-				Database:  "mydb",
-				TLSConfig: nil,
+				User:          "jack",
+				Host:          "127.0.0.1",
+				Port:          5433,
+				Database:      "mydb",
+				TLSConfig:     nil,
+				RuntimeParams: map[string]string{},
+			},
+		},
+		{
+			name:       "database url IPv6 with port",
+			connString: "postgresql://jack@[2001:db8::1]:5433/mydb?sslmode=disable",
+			config: &pgconn.Config{
+				User:          "jack",
+				Host:          "2001:db8::1",
+				Port:          5433,
+				Database:      "mydb",
+				TLSConfig:     nil,
+				RuntimeParams: map[string]string{},
+			},
+		},
+		{
+			name:       "database url IPv6 no port",
+			connString: "postgresql://jack@[2001:db8::1]/mydb?sslmode=disable",
+			config: &pgconn.Config{
+				User:          "jack",
+				Host:          "2001:db8::1",
+				Port:          5432,
+				Database:      "mydb",
+				TLSConfig:     nil,
+				RuntimeParams: map[string]string{},
+			},
+		},
+		{
+			name:       "DSN everything",
+			connString: "user=jack password=secret host=localhost port=5432 dbname=mydb sslmode=disable application_name=pgxtest search_path=myschema connect_timeout=5",
+			config: &pgconn.Config{
+				User:           "jack",
+				Password:       "secret",
+				Host:           "localhost",
+				Port:           5432,
+				Database:       "mydb",
+				TLSConfig:      nil,
+				ConnectTimeout: 5 * time.Second,
 				RuntimeParams: map[string]string{
 					"application_name": "pgxtest",
 					"search_path":      "myschema",
@@ -366,6 +432,20 @@ func TestParseConfig(t *testing.T) {
 				},
 			},
 		},
+		// https://github.com/jackc/pgconn/issues/72
+		{
+			name:       "URL without host but with port still uses default host",
+			connString: "postgres://jack:secret@:1/mydb?sslmode=disable",
+			config: &pgconn.Config{
+				User:          "jack",
+				Password:      "secret",
+				Host:          defaultHost,
+				Port:          1,
+				Database:      "mydb",
+				TLSConfig:     nil,
+				RuntimeParams: map[string]string{},
+			},
+		},
 		{
 			name:       "DSN multiple hosts one port",
 			connString: "user=jack password=secret host=foo,bar,baz port=5432 dbname=mydb sslmode=disable",
@@ -461,7 +541,7 @@ func TestParseConfig(t *testing.T) {
 			},
 		},
 		{
-			name:       "target_session_attrs",
+			name:       "target_session_attrs read-write",
 			connString: "postgres://jack:secret@localhost:5432/mydb?sslmode=disable&target_session_attrs=read-write",
 			config: &pgconn.Config{
 				User:            "jack",
@@ -474,6 +554,87 @@ func TestParseConfig(t *testing.T) {
 				ValidateConnect: pgconn.ValidateConnectTargetSessionAttrsReadWrite,
 			},
 		},
+		{
+			name:       "target_session_attrs read-only",
+			connString: "postgres://jack:secret@localhost:5432/mydb?sslmode=disable&target_session_attrs=read-only",
+			config: &pgconn.Config{
+				User:            "jack",
+				Password:        "secret",
+				Host:            "localhost",
+				Port:            5432,
+				Database:        "mydb",
+				TLSConfig:       nil,
+				RuntimeParams:   map[string]string{},
+				ValidateConnect: pgconn.ValidateConnectTargetSessionAttrsReadOnly,
+			},
+		},
+		{
+			name:       "target_session_attrs primary",
+			connString: "postgres://jack:secret@localhost:5432/mydb?sslmode=disable&target_session_attrs=primary",
+			config: &pgconn.Config{
+				User:          "jack",
+				Password:      "secret",
+				Host:          "localhost",
+				Port:          5432,
+				Database:      "mydb",
+				TLSConfig:     nil,
+				RuntimeParams: map[string]string{},
+				ValidateConnect: pgconn.ValidateConnectTargetSessionAttrsPrimary,
+			},
+		},
+		{
+			name:       "target_session_attrs standby",
+			connString: "postgres://jack:secret@localhost:5432/mydb?sslmode=disable&target_session_attrs=standby",
+			config: &pgconn.Config{
+				User:          "jack",
+				Password:      "secret",
+				Host:          "localhost",
+				Port:          5432,
+				Database:      "mydb",
+				TLSConfig:     nil,
+				RuntimeParams: map[string]string{},
+				ValidateConnect: pgconn.ValidateConnectTargetSessionAttrsStandby,
+			},
+		},
+		{
+			name:       "target_session_attrs prefer-standby",
+			connString: "postgres://jack:secret@localhost:5432/mydb?sslmode=disable&target_session_attrs=prefer-standby",
+			config: &pgconn.Config{
+				User:          "jack",
+				Password:      "secret",
+				Host:          "localhost",
+				Port:          5432,
+				Database:      "mydb",
+				TLSConfig:     nil,
+				RuntimeParams: map[string]string{},
+			},
+		},
+		{
+			name:       "target_session_attrs any",
+			connString: "postgres://jack:secret@localhost:5432/mydb?sslmode=disable&target_session_attrs=any",
+			config: &pgconn.Config{
+				User:          "jack",
+				Password:      "secret",
+				Host:          "localhost",
+				Port:          5432,
+				Database:      "mydb",
+				TLSConfig:     nil,
+				RuntimeParams: map[string]string{},
+			},
+		},
+		{
+			name:       "target_session_attrs not set (any)",
+			connString: "postgres://jack:secret@localhost:5432/mydb?sslmode=disable",
+			config: &pgconn.Config{
+				User:          "jack",
+				Password:      "secret",
+				Host:          "localhost",
+				Port:          5432,
+				Database:      "mydb",
+				TLSConfig:     nil,
+				RuntimeParams: map[string]string{},
+			},
+		},
 	}
 
 	for i, tt := range tests {
@@ -484,6 +645,62 @@ func TestParseConfig(t *testing.T) {
 
 		assertConfigsEqual(t, tt.config, config, fmt.Sprintf("Test %d (%s)", i, tt.name))
 	}
+}
+
+// https://github.com/jackc/pgconn/issues/47
+func TestParseConfigDSNWithTrailingEmptyEqualDoesNotPanic(t *testing.T) {
+	_, err := pgconn.ParseConfig("host= user= password= port= database=")
+	require.NoError(t, err)
+}
+
+func TestParseConfigDSNLeadingEqual(t *testing.T) {
+	_, err := pgconn.ParseConfig("= user=jack")
+	require.Error(t, err)
+}
+
+// https://github.com/jackc/pgconn/issues/49
+func TestParseConfigDSNTrailingBackslash(t *testing.T) {
+	_, err := pgconn.ParseConfig(`x=x\`)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "invalid backslash")
+}
+
+func TestConfigCopyReturnsEqualConfig(t *testing.T) {
+	connString := "postgres://jack:secret@localhost:5432/mydb?application_name=pgxtest&search_path=myschema&connect_timeout=5"
+	original, err := pgconn.ParseConfig(connString)
+	require.NoError(t, err)
+
+	copied := original.Copy()
+	assertConfigsEqual(t, original, copied, "Test Config.Copy() returns equal config")
+}
+
+func TestConfigCopyOriginalConfigDidNotChange(t *testing.T) {
+	connString := "postgres://jack:secret@localhost:5432/mydb?application_name=pgxtest&search_path=myschema&connect_timeout=5&sslmode=prefer"
+	original, err := pgconn.ParseConfig(connString)
+	require.NoError(t, err)
+
+	copied := original.Copy()
+	assertConfigsEqual(t, original, copied, "Test Config.Copy() returns equal config")
+
+	copied.Port = uint16(5433)
+	copied.RuntimeParams["foo"] = "bar"
+	copied.Fallbacks[0].Port = uint16(5433)
+
+	assert.Equal(t, uint16(5432), original.Port)
+	assert.Equal(t, "", original.RuntimeParams["foo"])
+	assert.Equal(t, uint16(5432), original.Fallbacks[0].Port)
+}
+
+func TestConfigCopyCanBeUsedToConnect(t *testing.T) {
+	connString := os.Getenv("PGX_TEST_CONN_STRING")
+	original, err := pgconn.ParseConfig(connString)
+	require.NoError(t, err)
+
+	copied := original.Copy()
+	assert.NotPanics(t, func() {
+		_, err = pgconn.ConnectConfig(context.Background(), copied)
+	})
+	assert.NoError(t, err)
 }
 
 func assertConfigsEqual(t *testing.T, expected, actual *pgconn.Config, testName string) {
@@ -499,6 +716,7 @@ func assertConfigsEqual(t *testing.T, expected, actual *pgconn.Config, testName 
 	assert.Equalf(t, expected.Port, actual.Port, "%s - Port", testName)
 	assert.Equalf(t, expected.User, actual.User, "%s - User", testName)
 	assert.Equalf(t, expected.Password, actual.Password, "%s - Password", testName)
+	assert.Equalf(t, expected.ConnectTimeout, actual.ConnectTimeout, "%s - ConnectTimeout", testName)
 	assert.Equalf(t, expected.RuntimeParams, actual.RuntimeParams, "%s - RuntimeParams", testName)
 
 	// Can't test function equality, so just test that they are set or not.
@@ -531,7 +749,13 @@ func TestParseConfigEnvLibpq(t *testing.T) {
 	var osUserName string
 	osUser, err := user.Current()
 	if err == nil {
-		osUserName = osUser.Username
+		// Windows gives us the username here as `DOMAIN\user` or `LOCALPCNAME\user`,
+		// but the libpq default is just the `user` portion, so we strip off the first part.
+		if runtime.GOOS == "windows" && strings.Contains(osUser.Username, "\\") {
+			osUserName = osUser.Username[strings.LastIndex(osUser.Username, "\\")+1:]
+		} else {
+			osUserName = osUser.Username
+		}
 	}
 
 	pgEnvvars := []string{"PGHOST", "PGPORT", "PGDATABASE", "PGUSER", "PGPASSWORD", "PGAPPNAME", "PGSSLMODE", "PGCONNECT_TIMEOUT"}
@@ -588,13 +812,14 @@ func TestParseConfigEnvLibpq(t *testing.T) {
 				"PGAPPNAME":         "pgxtest",
 			},
 			config: &pgconn.Config{
-				Host:          "123.123.123.123",
-				Port:          7777,
-				Database:      "foo",
-				User:          "bar",
-				Password:      "baz",
-				TLSConfig:     nil,
-				RuntimeParams: map[string]string{"application_name": "pgxtest"},
+				Host:           "123.123.123.123",
+				Port:           7777,
+				Database:       "foo",
+				User:           "bar",
+				Password:       "baz",
+				ConnectTimeout: 10 * time.Second,
+				TLSConfig:      nil,
+				RuntimeParams:  map[string]string{"application_name": "pgxtest"},
 			},
 		},
 	}
@@ -646,6 +871,101 @@ func TestParseConfigReadsPgPassfile(t *testing.T) {
 	assert.NoError(t, err)
 
 	assertConfigsEqual(t, expected, actual, "passfile")
+}
+
+func TestParseConfigReadsPgServiceFile(t *testing.T) {
+	t.Parallel()
+
+	tf, err := ioutil.TempFile("", "")
+	require.NoError(t, err)
+
+	defer tf.Close()
+	defer os.Remove(tf.Name())
+
+	_, err = tf.Write([]byte(`
+[abc]
+host=abc.example.com
+port=9999
+dbname=abcdb
+user=abcuser
+
+[def]
+host = def.example.com
+dbname = defdb
+user = defuser
+application_name = spaced string
+`))
+	require.NoError(t, err)
+
+	tests := []struct {
+		name       string
+		connString string
+		config     *pgconn.Config
+	}{
+		{
+			name:       "abc",
+			connString: fmt.Sprintf("postgres:///?servicefile=%s&service=%s", tf.Name(), "abc"),
+			config: &pgconn.Config{
+				Host:     "abc.example.com",
+				Database: "abcdb",
+				User:     "abcuser",
+				Port:     9999,
+				TLSConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+				RuntimeParams: map[string]string{},
+				Fallbacks: []*pgconn.FallbackConfig{
+					&pgconn.FallbackConfig{
+						Host:      "abc.example.com",
+						Port:      9999,
+						TLSConfig: nil,
+					},
+				},
+			},
+		},
+		{
+			name:       "def",
+			connString: fmt.Sprintf("postgres:///?servicefile=%s&service=%s", tf.Name(), "def"),
+			config: &pgconn.Config{
+				Host:     "def.example.com",
+				Port:     5432,
+				Database: "defdb",
+				User:     "defuser",
+				TLSConfig: &tls.Config{
+					InsecureSkipVerify: true,
+				},
+				RuntimeParams: map[string]string{"application_name": "spaced string"},
+				Fallbacks: []*pgconn.FallbackConfig{
+					&pgconn.FallbackConfig{
+						Host:      "def.example.com",
+						Port:      5432,
+						TLSConfig: nil,
+					},
+				},
+			},
+		},
+		{
+			name:       "conn string has precedence",
+			connString: fmt.Sprintf("postgres://other.example.com:7777/?servicefile=%s&service=%s&sslmode=disable", tf.Name(), "abc"),
+			config: &pgconn.Config{
+				Host:          "other.example.com",
+				Database:      "abcdb",
+				User:          "abcuser",
+				Port:          7777,
+				TLSConfig:     nil,
+				RuntimeParams: map[string]string{},
+			},
+		},
+	}
+
+	for i, tt := range tests {
+		config, err := pgconn.ParseConfig(tt.connString)
+		if !assert.NoErrorf(t, err, "Test %d (%s)", i, tt.name) {
+			continue
+		}
+
+		assertConfigsEqual(t, tt.config, config, fmt.Sprintf("Test %d (%s)", i, tt.name))
+	}
 }
 
 func TestParseConfigExtractsMinReadBufferSize(t *testing.T) {
