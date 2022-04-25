@@ -257,8 +257,6 @@ func ParseConfig(connString string) (*Config, error) {
 		"sslkey":               {},
 		"sslcert":              {},
 		"sslrootcert":          {},
-		"krbspn":               {},
-		"krbsrvname":           {},
 		"target_session_attrs": {},
 		"min_read_buffer_size": {},
 		"service":              {},
