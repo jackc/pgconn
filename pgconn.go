@@ -418,10 +418,10 @@ func (pgConn *PgConn) signalMessage() chan struct{} {
 // This is a very low level method that requires deep understanding of the PostgreSQL wire protocol to use correctly.
 // See https://www.postgresql.org/docs/current/protocol.html.
 func (pgConn *PgConn) SendBytes(ctx context.Context, buf []byte) error {
-	if err := pgConn.lock(); err != nil {
-		return err
-	}
-	defer pgConn.unlock()
+	// if err := pgConn.lock(); err != nil {
+	// 	return err
+	// }
+	// defer pgConn.unlock()
 
 	if ctx != context.Background() {
 		select {
@@ -450,10 +450,10 @@ func (pgConn *PgConn) SendBytes(ctx context.Context, buf []byte) error {
 // This is a very low level method that requires deep understanding of the PostgreSQL wire protocol to use correctly.
 // See https://www.postgresql.org/docs/current/protocol.html.
 func (pgConn *PgConn) ReceiveMessage(ctx context.Context) (pgproto3.BackendMessage, error) {
-	if err := pgConn.lock(); err != nil {
-		return nil, err
-	}
-	defer pgConn.unlock()
+	// if err := pgConn.lock(); err != nil {
+	// 	return nil, err
+	// }
+	// defer pgConn.unlock()
 
 	if ctx != context.Background() {
 		select {
