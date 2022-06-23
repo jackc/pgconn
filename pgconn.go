@@ -90,10 +90,11 @@ type PgConn struct {
 	peekedMsg pgproto3.BackendMessage
 
 	// Reusable / preallocated resources
-	wbuf              []byte // write buffer
-	resultReader      ResultReader
-	multiResultReader MultiResultReader
-	contextWatcher    *ctxwatch.ContextWatcher
+	wbuf                []byte // write buffer
+	resultReader        ResultReader
+	multiResultReader   MultiResultReader
+	readContextWatcher  *ctxwatch.ContextWatcher
+	writeContextWatcher *ctxwatch.ContextWatcher
 
 	cleanupDone chan struct{}
 }
@@ -245,23 +246,29 @@ func connect(ctx context.Context, config *Config, fallbackConfig *FallbackConfig
 	}
 
 	pgConn.conn = netConn
-	pgConn.contextWatcher = newContextWatcher(netConn)
-	pgConn.contextWatcher.Watch(ctx)
+	pgConn.readContextWatcher = newReadWriteContextWatcher(netConn, false)
+	pgConn.writeContextWatcher = newReadWriteContextWatcher(netConn, true)
+	pgConn.readContextWatcher.Watch(ctx)
+	pgConn.writeContextWatcher.Watch(ctx)
 
 	if fallbackConfig.TLSConfig != nil {
 		tlsConn, err := startTLS(netConn, fallbackConfig.TLSConfig)
-		pgConn.contextWatcher.Unwatch() // Always unwatch `netConn` after TLS.
+		pgConn.readContextWatcher.Unwatch()  // Always unwatch `netConn` after TLS.
+		pgConn.writeContextWatcher.Unwatch() // Always unwatch `netConn` after TLS.
 		if err != nil {
 			netConn.Close()
 			return nil, &connectError{config: config, msg: "tls error", err: err}
 		}
 
 		pgConn.conn = tlsConn
-		pgConn.contextWatcher = newContextWatcher(tlsConn)
-		pgConn.contextWatcher.Watch(ctx)
+		pgConn.readContextWatcher = newReadWriteContextWatcher(tlsConn, false)
+		pgConn.writeContextWatcher = newReadWriteContextWatcher(tlsConn, true)
+		pgConn.readContextWatcher.Watch(ctx)
+		pgConn.writeContextWatcher.Watch(ctx)
 	}
 
-	defer pgConn.contextWatcher.Unwatch()
+	defer pgConn.readContextWatcher.Unwatch()
+	defer pgConn.writeContextWatcher.Unwatch()
 
 	pgConn.parameterStatuses = make(map[string]string)
 	pgConn.status = connStatusConnecting
@@ -336,7 +343,8 @@ func connect(ctx context.Context, config *Config, fallbackConfig *FallbackConfig
 				// restart the watch after ValidateConnect returns.
 				//
 				// See https://github.com/jackc/pgconn/issues/40.
-				pgConn.contextWatcher.Unwatch()
+				pgConn.readContextWatcher.Unwatch()
+				pgConn.writeContextWatcher.Unwatch()
 
 				err := config.ValidateConnect(ctx, pgConn)
 				if err != nil {
@@ -357,11 +365,19 @@ func connect(ctx context.Context, config *Config, fallbackConfig *FallbackConfig
 	}
 }
 
-func newContextWatcher(conn net.Conn) *ctxwatch.ContextWatcher {
-	return ctxwatch.NewContextWatcher(
-		func() { conn.SetDeadline(time.Date(1, 1, 1, 1, 1, 1, 1, time.UTC)) },
-		func() { conn.SetDeadline(time.Time{}) },
-	)
+func newReadWriteContextWatcher(conn net.Conn, isWriter bool) *ctxwatch.ContextWatcher {
+
+	if isWriter {
+		return ctxwatch.NewContextWatcher(
+			func() { conn.SetWriteDeadline(time.Date(1, 1, 1, 1, 1, 1, 1, time.UTC)) },
+			func() { conn.SetWriteDeadline(time.Time{}) },
+		)
+	} else {
+		return ctxwatch.NewContextWatcher(
+			func() { conn.SetReadDeadline(time.Date(1, 1, 1, 1, 1, 1, 1, time.UTC)) },
+			func() { conn.SetReadDeadline(time.Time{}) },
+		)
+	}
 }
 
 func startTLS(conn net.Conn, tlsConfig *tls.Config) (net.Conn, error) {
@@ -418,10 +434,6 @@ func (pgConn *PgConn) signalMessage() chan struct{} {
 // This is a very low level method that requires deep understanding of the PostgreSQL wire protocol to use correctly.
 // See https://www.postgresql.org/docs/current/protocol.html.
 func (pgConn *PgConn) SendBytes(ctx context.Context, buf []byte) error {
-	// if err := pgConn.lock(); err != nil {
-	// 	return err
-	// }
-	// defer pgConn.unlock()
 
 	if ctx != context.Background() {
 		select {
@@ -429,8 +441,8 @@ func (pgConn *PgConn) SendBytes(ctx context.Context, buf []byte) error {
 			return newContextAlreadyDoneError(ctx)
 		default:
 		}
-		pgConn.contextWatcher.Watch(ctx)
-		defer pgConn.contextWatcher.Unwatch()
+		pgConn.writeContextWatcher.Watch(ctx)
+		defer pgConn.writeContextWatcher.Unwatch()
 	}
 
 	n, err := pgConn.conn.Write(buf)
@@ -450,10 +462,6 @@ func (pgConn *PgConn) SendBytes(ctx context.Context, buf []byte) error {
 // This is a very low level method that requires deep understanding of the PostgreSQL wire protocol to use correctly.
 // See https://www.postgresql.org/docs/current/protocol.html.
 func (pgConn *PgConn) ReceiveMessage(ctx context.Context) (pgproto3.BackendMessage, error) {
-	// if err := pgConn.lock(); err != nil {
-	// 	return nil, err
-	// }
-	// defer pgConn.unlock()
 
 	if ctx != context.Background() {
 		select {
@@ -461,8 +469,8 @@ func (pgConn *PgConn) ReceiveMessage(ctx context.Context) (pgproto3.BackendMessa
 			return nil, newContextAlreadyDoneError(ctx)
 		default:
 		}
-		pgConn.contextWatcher.Watch(ctx)
-		defer pgConn.contextWatcher.Unwatch()
+		pgConn.readContextWatcher.Watch(ctx)
+		defer pgConn.readContextWatcher.Unwatch()
 	}
 
 	msg, err := pgConn.receiveMessage()
@@ -599,10 +607,13 @@ func (pgConn *PgConn) Close(ctx context.Context) error {
 		// previous watch. It is safe to Unwatch regardless of whether a watch is already is progress.
 		//
 		// See https://github.com/jackc/pgconn/issues/29
-		pgConn.contextWatcher.Unwatch()
+		pgConn.readContextWatcher.Unwatch()
+		pgConn.writeContextWatcher.Unwatch()
 
-		pgConn.contextWatcher.Watch(ctx)
-		defer pgConn.contextWatcher.Unwatch()
+		pgConn.readContextWatcher.Watch(ctx)
+		pgConn.writeContextWatcher.Watch(ctx)
+		defer pgConn.readContextWatcher.Unwatch()
+		defer pgConn.writeContextWatcher.Unwatch()
 	}
 
 	// Ignore any errors sending Terminate message and waiting for server to close connection.
@@ -791,8 +802,10 @@ func (pgConn *PgConn) Prepare(ctx context.Context, name, sql string, paramOIDs [
 			return nil, newContextAlreadyDoneError(ctx)
 		default:
 		}
-		pgConn.contextWatcher.Watch(ctx)
-		defer pgConn.contextWatcher.Unwatch()
+		pgConn.readContextWatcher.Watch(ctx)
+		pgConn.writeContextWatcher.Watch(ctx)
+		defer pgConn.readContextWatcher.Unwatch()
+		defer pgConn.writeContextWatcher.Unwatch()
 	}
 
 	buf := pgConn.wbuf
@@ -922,8 +935,8 @@ func (pgConn *PgConn) WaitForNotification(ctx context.Context) error {
 		default:
 		}
 
-		pgConn.contextWatcher.Watch(ctx)
-		defer pgConn.contextWatcher.Unwatch()
+		pgConn.readContextWatcher.Watch(ctx)
+		defer pgConn.readContextWatcher.Unwatch()
 	}
 
 	for {
@@ -966,7 +979,7 @@ func (pgConn *PgConn) Exec(ctx context.Context, sql string) *MultiResultReader {
 			return multiResult
 		default:
 		}
-		pgConn.contextWatcher.Watch(ctx)
+		pgConn.writeContextWatcher.Watch(ctx)
 	}
 
 	buf := pgConn.wbuf
@@ -975,7 +988,7 @@ func (pgConn *PgConn) Exec(ctx context.Context, sql string) *MultiResultReader {
 	n, err := pgConn.conn.Write(buf)
 	if err != nil {
 		pgConn.asyncClose()
-		pgConn.contextWatcher.Unwatch()
+		pgConn.writeContextWatcher.Unwatch()
 		multiResult.closed = true
 		multiResult.err = &writeError{err: err, safeToRetry: n == 0}
 		pgConn.unlock()
@@ -1012,7 +1025,8 @@ func (pgConn *PgConn) ReceiveResults(ctx context.Context) *MultiResultReader {
 			return multiResult
 		default:
 		}
-		pgConn.contextWatcher.Watch(ctx)
+		pgConn.readContextWatcher.Watch(ctx)
+		pgConn.writeContextWatcher.Watch(ctx)
 	}
 
 	return multiResult
@@ -1107,7 +1121,8 @@ func (pgConn *PgConn) execExtendedPrefix(ctx context.Context, paramValues [][]by
 			return result
 		default:
 		}
-		pgConn.contextWatcher.Watch(ctx)
+		pgConn.readContextWatcher.Watch(ctx)
+		pgConn.writeContextWatcher.Watch(ctx)
 	}
 
 	return result
@@ -1122,7 +1137,8 @@ func (pgConn *PgConn) execExtendedSuffix(buf []byte, result *ResultReader) {
 	if err != nil {
 		pgConn.asyncClose()
 		result.concludeCommand(nil, &writeError{err: err, safeToRetry: n == 0})
-		pgConn.contextWatcher.Unwatch()
+		pgConn.readContextWatcher.Unwatch()
+		pgConn.writeContextWatcher.Unwatch()
 		result.closed = true
 		pgConn.unlock()
 		return
@@ -1144,8 +1160,10 @@ func (pgConn *PgConn) CopyTo(ctx context.Context, w io.Writer, sql string) (Comm
 			return nil, newContextAlreadyDoneError(ctx)
 		default:
 		}
-		pgConn.contextWatcher.Watch(ctx)
-		defer pgConn.contextWatcher.Unwatch()
+		pgConn.readContextWatcher.Watch(ctx)
+		pgConn.writeContextWatcher.Watch(ctx)
+		defer pgConn.readContextWatcher.Unwatch()
+		defer pgConn.writeContextWatcher.Unwatch()
 	}
 
 	// Send copy to command
@@ -1204,8 +1222,10 @@ func (pgConn *PgConn) CopyFrom(ctx context.Context, r io.Reader, sql string) (Co
 			return nil, newContextAlreadyDoneError(ctx)
 		default:
 		}
-		pgConn.contextWatcher.Watch(ctx)
-		defer pgConn.contextWatcher.Unwatch()
+		pgConn.readContextWatcher.Watch(ctx)
+		pgConn.writeContextWatcher.Watch(ctx)
+		defer pgConn.readContextWatcher.Unwatch()
+		defer pgConn.writeContextWatcher.Unwatch()
 	}
 
 	// Send copy to command
@@ -1339,7 +1359,8 @@ func (mrr *MultiResultReader) receiveMessage() (pgproto3.BackendMessage, error) 
 	msg, err := mrr.pgConn.receiveMessage()
 
 	if err != nil {
-		mrr.pgConn.contextWatcher.Unwatch()
+		mrr.pgConn.readContextWatcher.Unwatch()
+		mrr.pgConn.writeContextWatcher.Unwatch()
 		mrr.err = preferContextOverNetTimeoutError(mrr.ctx, err)
 		mrr.closed = true
 		mrr.pgConn.asyncClose()
@@ -1348,7 +1369,8 @@ func (mrr *MultiResultReader) receiveMessage() (pgproto3.BackendMessage, error) 
 
 	switch msg := msg.(type) {
 	case *pgproto3.ReadyForQuery:
-		mrr.pgConn.contextWatcher.Unwatch()
+		mrr.pgConn.readContextWatcher.Unwatch()
+		mrr.pgConn.writeContextWatcher.Unwatch()
 		mrr.closed = true
 		mrr.pgConn.unlock()
 	case *pgproto3.ErrorResponse:
@@ -1509,7 +1531,8 @@ func (rr *ResultReader) Close() (CommandTag, error) {
 			case *pgproto3.ErrorResponse:
 				rr.err = ErrorResponseToPgError(msg)
 			case *pgproto3.ReadyForQuery:
-				rr.pgConn.contextWatcher.Unwatch()
+				rr.pgConn.readContextWatcher.Unwatch()
+				rr.pgConn.writeContextWatcher.Unwatch()
 				rr.pgConn.unlock()
 				return rr.commandTag, rr.err
 			}
@@ -1549,7 +1572,8 @@ func (rr *ResultReader) receiveMessage() (msg pgproto3.BackendMessage, err error
 	if err != nil {
 		err = preferContextOverNetTimeoutError(rr.ctx, err)
 		rr.concludeCommand(nil, err)
-		rr.pgConn.contextWatcher.Unwatch()
+		rr.pgConn.readContextWatcher.Unwatch()
+		rr.pgConn.writeContextWatcher.Unwatch()
 		rr.closed = true
 		if rr.multiResultReader == nil {
 			rr.pgConn.asyncClose()
@@ -1631,7 +1655,8 @@ func (pgConn *PgConn) ExecBatch(ctx context.Context, batch *Batch) *MultiResultR
 			return multiResult
 		default:
 		}
-		pgConn.contextWatcher.Watch(ctx)
+		pgConn.readContextWatcher.Watch(ctx)
+		pgConn.writeContextWatcher.Watch(ctx)
 	}
 
 	batch.buf = (&pgproto3.Sync{}).Encode(batch.buf)
@@ -1727,7 +1752,8 @@ func Construct(hc *HijackedConn) (*PgConn, error) {
 		cleanupDone: make(chan struct{}),
 	}
 
-	pgConn.contextWatcher = newContextWatcher(pgConn.conn)
+	pgConn.readContextWatcher = newReadWriteContextWatcher(pgConn.conn, false)
+	pgConn.readContextWatcher = newReadWriteContextWatcher(pgConn.conn, true)
 
 	return pgConn, nil
 }
