@@ -1191,6 +1191,22 @@ func (pgConn *PgConn) CopyTo(ctx context.Context, w io.Writer, sql string) (Comm
 		return nil, &writeError{err: err, safeToRetry: n == 0}
 	}
 
+	// Wait for CopyIn response before sending data. This prevents the frontend
+	// from sending data before the backend has indicated that it is ready for it.
+	msg, err := pgConn.receiveMessage()
+	if err != nil {
+		pgConn.asyncClose()
+		return nil, preferContextOverNetTimeoutError(ctx, err)
+	}
+	switch msg := msg.(type) {
+	case *pgproto3.CopyInResponse:
+		// This is the expected response. Continue with the copy operation.
+	case *pgproto3.ErrorResponse:
+		return nil, ErrorResponseToPgError(msg)
+	default:
+		return nil, fmt.Errorf("received unexpected response to COPY command: %v", msg)
+	}
+
 	// Read results
 	var commandTag CommandTag
 	var pgErr error
