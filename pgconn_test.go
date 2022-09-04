@@ -7,6 +7,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"github.com/jackc/pgio"
 	"io"
 	"io/ioutil"
 	"log"
@@ -1642,6 +1643,67 @@ func TestConnCopyFrom(t *testing.T) {
 	}
 
 	ct, err := pgConn.CopyFrom(context.Background(), srcBuf, "COPY foo FROM STDIN WITH (FORMAT csv)")
+	require.NoError(t, err)
+	assert.Equal(t, int64(len(inputRows)), ct.RowsAffected())
+
+	result := pgConn.ExecParams(context.Background(), "select * from foo", nil, nil, nil, nil).Read()
+	require.NoError(t, result.Err)
+
+	assert.Equal(t, inputRows, result.Rows)
+
+	ensureConnValid(t, pgConn)
+}
+
+func TestConnCopyFromBinary(t *testing.T) {
+	t.Parallel()
+
+	pgConn, err := pgconn.Connect(context.Background(), os.Getenv("PGX_TEST_CONN_STRING"))
+	require.NoError(t, err)
+	defer closeConn(t, pgConn)
+
+	if pgConn.ParameterStatus("crdb_version") != "" {
+		t.Skip("Server does not fully support COPY FROM (https://www.cockroachlabs.com/docs/v20.2/copy-from.html)")
+	}
+
+	_, err = pgConn.Exec(context.Background(), `create temporary table foo(
+		a int4,
+		b varchar
+	)`).ReadAll()
+	require.NoError(t, err)
+
+	srcBuf := &bytes.Buffer{}
+
+	inputRows := [][][]byte{}
+	var data []byte
+	// Write header
+	data = append(data, "PGCOPY\n\377\r\n\000"...)
+	data = pgio.AppendInt32(data, int32(0))
+	data = pgio.AppendInt32(data, int32(0))
+	srcBuf.Write(data)
+	for i := 0; i < 1000; i++ {
+		data = make([]byte, 0)
+		// Write num fields
+		data = pgio.AppendInt16(data, int16(2))
+		// Write the length of the field + actual data.
+		data = pgio.AppendInt32(data, int32(4))
+		data = pgio.AppendInt32(data, int32(i))
+		a := strconv.Itoa(i)
+		b := []byte("foo " + a + " bar")
+		data = pgio.AppendInt32(data, int32(len(b)))
+		_, err = srcBuf.Write(data)
+		require.NoError(t, err)
+		_, err = srcBuf.Write(b)
+		require.NoError(t, err)
+
+		inputRows = append(inputRows, [][]byte{[]byte(a), b})
+	}
+	data = make([]byte, 0)
+	// -1 == End of COPY stream.
+	data = pgio.AppendInt16(data, int16(-1))
+	_, err = srcBuf.Write(data)
+	require.NoError(t, err)
+
+	ct, err := pgConn.CopyFrom(context.Background(), srcBuf, "COPY foo FROM STDIN BINARY")
 	require.NoError(t, err)
 	assert.Equal(t, int64(len(inputRows)), ct.RowsAffected())
 
