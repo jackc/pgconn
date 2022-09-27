@@ -1254,8 +1254,11 @@ func (pgConn *PgConn) CopyFrom(ctx context.Context, r io.Reader, sql string) (Co
 	abortCopyChan := make(chan struct{})
 	copyErrChan := make(chan error, 1)
 	signalMessageChan := pgConn.signalMessage()
+	var wg sync.WaitGroup
+	wg.Add(1)
 
 	go func() {
+		defer wg.Done()
 		buf := make([]byte, 0, 65536)
 		buf = append(buf, 'd')
 		sp := len(buf)
@@ -1309,6 +1312,8 @@ func (pgConn *PgConn) CopyFrom(ctx context.Context, r io.Reader, sql string) (Co
 		}
 	}
 	close(abortCopyChan)
+	// Make sure io goroutine finishes before writing.
+	wg.Wait()
 
 	buf = buf[:0]
 	if copyErr == io.EOF || pgErr != nil {
