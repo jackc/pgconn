@@ -2364,6 +2364,10 @@ func TestCopyFrom(t *testing.T) {
 	pgConn, err := pgconn.ConnectConfig(context.Background(), config)
 	require.NoError(t, err)
 
+	if pgConn.ParameterStatus("crdb_version") != "" {
+		t.Skip("Server does support COPY FROM")
+	}
+
 	setupSQL := `create temporary table t (
 		id text primary key,
 		n int not null
