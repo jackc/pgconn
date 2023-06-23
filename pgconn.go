@@ -176,7 +176,7 @@ func ConnectConfig(octx context.Context, config *Config) (pgConn *PgConn, err er
 			const ERRCODE_INVALID_CATALOG_NAME = "3D000"                // db does not exist
 			const ERRCODE_INSUFFICIENT_PRIVILEGE = "42501"              // missing connect privilege
 			if pgerr.Code == ERRCODE_INVALID_PASSWORD ||
-				pgerr.Code == ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION ||
+				pgerr.Code == ERRCODE_INVALID_AUTHORIZATION_SPECIFICATION && strings.Contains(pgerr.Message, "SSL on") ||
 				pgerr.Code == ERRCODE_INVALID_CATALOG_NAME ||
 				pgerr.Code == ERRCODE_INSUFFICIENT_PRIVILEGE {
 				break
