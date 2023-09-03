@@ -46,6 +46,7 @@ type PgError struct {
 	File             string
 	Line             int32
 	Routine          string
+	NetworkError     error
 }
 
 func (pe *PgError) Error() string {
