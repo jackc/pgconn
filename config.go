@@ -528,6 +528,12 @@ func parseDSNSettings(s string) (map[string]string, error) {
 		}
 
 		key = strings.Trim(s[:eqIdx], " \t\n\r\v\f")
+		s = s[eqIdx+1:]
+
+		if s[0] == ' ' && s[1] != '\'' {
+			settings[key] = ""
+			continue
+		}
 		s = strings.TrimLeft(s[eqIdx+1:], " \t\n\r\v\f")
 		if len(s) == 0 {
 		} else if s[0] != '\'' {

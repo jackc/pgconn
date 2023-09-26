@@ -79,6 +79,19 @@ func TestParseConfig(t *testing.T) {
 			},
 		},
 		{
+			name:       "DNS with empty password",
+			connString: "host=localhost user=jack password= dbname=mydb port=5432 sslmode=disable ",
+			config: &pgconn.Config{
+				User:          "jack",
+				Host:          "localhost",
+				Port:          5432,
+				Password:      "",
+				Database:      "mydb",
+				TLSConfig:     nil,
+				RuntimeParams: map[string]string{},
+			},
+		},
+		{
 			name:       "sslmode allow",
 			connString: "postgres://jack:secret@localhost:5432/mydb?sslmode=allow",
 			config: &pgconn.Config{
