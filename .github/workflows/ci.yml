@@ -14,7 +14,7 @@ jobs:
 
     strategy:
       matrix:
-        go-version: [1.15, 1.16]
+        go-version: [1.17, 1.18]
         pg-version: [9.6, 10, 11, 12, 13, cockroachdb]
         include:
           - pg-version: 9.6
