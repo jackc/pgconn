@@ -1,6 +1,6 @@
 module github.com/jackc/pgconn
 
-go 1.17
+go 1.21
 
 require (
 	github.com/jackc/chunkreader/v2 v2.0.1
