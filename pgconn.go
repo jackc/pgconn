@@ -1472,7 +1472,11 @@ func (mrr *MultiResultReader) receiveMessage() (pgproto3.BackendMessage, error) 
 
 	if err != nil {
 		mrr.pgConn.contextWatcher.Unwatch()
-		mrr.err = preferContextOverNetTimeoutError(mrr.ctx, err)
+		if x, ok := mrr.err.(*PgError); ok {
+			x.NetworkError = err
+		} else {
+			mrr.err = preferContextOverNetTimeoutError(mrr.ctx, err)
+		}
 		mrr.closed = true
 		mrr.pgConn.asyncClose()
 		return nil, mrr.err
